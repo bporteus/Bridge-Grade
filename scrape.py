@@ -101,6 +101,35 @@ scrape_cook_pvi = make_fetcher(
         output= "data/raw/cook_pvi.csv"
 )
 
+def write_cook_pvi(con, row):
+        con.execute("""
+        insert into cook_pvi (
+            Dist, First, Last, Party, PVI_2023, PVI_2023_raw, Rank
+        ) values (
+             ?,  ?,  ?,  ?,  ?,  ?, ?
+        );
+        """, row)
+
+
+def load_cook_pvi(con, filename):
+    with con:
+        con.execute("""
+        CREATE TABLE cook_pvi (
+            Dist text,
+            First text,
+            Last text,
+            Party text,
+            PVI_2023 text,
+            PVI_2023_raw text,
+            Rank integer
+            );
+        """)
+        with open(filename) as fp:
+            reader = csv.reader(fp, delimiter='\t')
+            next(reader) # throw out header
+            for row in reader:
+                row[6] = int(row[6])
+                write_cook_pvi(con, row)
 ######################################################################
 
 scrape_govtrack_cosponsor_house = make_fetcher(
@@ -240,11 +269,14 @@ if __name__ == "__main__":
 
     con = sqlite3.connect("data/clean/bridge.sqlite")
 
+    # 538
     fetch_if_needed(scrape_538_quiet_caucus)
     load_538(con, scrape_538_quiet_caucus.output)
-    con.close()
 
+    # Cook PVI
     fetch_if_needed(scrape_cook_pvi)
+    load_cook_pvi(con, scrape_cook_pvi.output)
+    con.close()
 
     fetch_if_needed(scrape_govtrack_cosponsor_house)
     fetch_if_needed(scrape_govtrack_cosponsor_senate)
