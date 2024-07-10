@@ -259,6 +259,43 @@ scrape_lugar_senate = make_fetcher(
         output= "data/raw/lugar_senate.html"
 )
 
+def write_lugar(con, row, chamber):
+        con.execute("""
+        insert into lugar (
+            chamber, first, last, state, party, score
+        ) values (
+           ?,?,?,?,?,?
+        );
+        """, (chamber, *row))
+
+
+def load_lugar(con, filename, chamber):
+    with con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS lugar(
+            chamber text,
+            first text,
+            last text,
+            state text,
+            party text,
+            score real
+            );
+        """)
+
+        with open(filename) as fp:
+            soup = bs4.BeautifulSoup(fp)
+
+        main_table = soup.find_all("table")[2]
+
+        rows = iter(main_table.find_all("tr"))
+        next(rows) # skip top header
+        next(rows) # skip inner header
+
+        for row in rows:
+            row = [x.text for x in row.find_all("td")][1:6]
+            row[4] = float(row[4])
+            write_lugar(con, row, chamber)
+
 ######################################################################
 
 states = [
@@ -349,12 +386,6 @@ def scrape_commonground_state_index(state_tup):
 
 
 
-
-
-
-
-
-
 if __name__ == "__main__":
     os.makedirs("data/raw", exist_ok=True)
     os.makedirs("data/clean", exist_ok=True)
@@ -378,10 +409,12 @@ if __name__ == "__main__":
     # VoteView
     fetch_if_needed(scrape_voteview)
     load_voteview(con, scrape_voteview.output)
-    con.close()
 
     fetch_if_needed(scrape_lugar_house)
     fetch_if_needed(scrape_lugar_senate)
+    load_lugar(con, scrape_lugar_house.output, 'House')
+    load_lugar(con, scrape_lugar_senate.output, 'Sentate')
+    con.close()
 
     # h/t https://docs.python.org/3/library/itertools.html#itertools-recipes
     collections.deque(map(scrape_commonground_state_index, states), 0)
