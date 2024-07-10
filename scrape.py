@@ -1,5 +1,6 @@
 import requests
 import bs4
+import xlsxwriter
 
 
 import collections
@@ -47,9 +48,9 @@ scrape_538_quiet_caucus = make_fetcher(
 def write_538(con, row):
     con.execute("""
     insert into five_thirty_eight_quiet_caucus (
-        icpsr, name, last_name , party , district , terms_pct , margin_2020 , cluster , agreement_score , progressive , new_dems , blue_dogs , problem_solvers , RMSP , governance , study , freedom , dw_nominate_dim1 , dw_nominate_dim2 , notes
+        chamber, icpsr, name, last_name , party , district , terms_pct , margin_2020 , cluster , agreement_score , progressive , new_dems , blue_dogs , problem_solvers , RMSP , governance , study , freedom , dw_nominate_dim1 , dw_nominate_dim2 , notes
     ) values (
-         ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?, ?
+        'House', ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?, ?
     );
     """, row )
 
@@ -58,6 +59,7 @@ def load_538(con, filename):
         con.execute("""
 
         CREATE TABLE five_thirty_eight_quiet_caucus (
+            chamber text,
             icpsr integer,
 			name text,
 			last_name text,
@@ -484,34 +486,39 @@ if __name__ == "__main__":
     os.makedirs("data/raw", exist_ok=True)
     os.makedirs("data/clean", exist_ok=True)
 
-    con = sqlite3.connect("data/clean/bridge.sqlite")
 
-    # 538
+    # Scrape
     fetch_if_needed(scrape_538_quiet_caucus)
-    load_538(con, scrape_538_quiet_caucus.output)
-
-    # Cook PVI
     fetch_if_needed(scrape_cook_pvi)
-    load_cook_pvi(con, scrape_cook_pvi.output)
-
-    # GovTrack
     fetch_if_needed(scrape_govtrack_cosponsor_house)
     fetch_if_needed(scrape_govtrack_cosponsor_senate)
-    load_govtrack_cosponsor(con, scrape_govtrack_cosponsor_house.output, "house")
-    load_govtrack_cosponsor(con, scrape_govtrack_cosponsor_senate.output, "senate")
-
-    # VoteView
     fetch_if_needed(scrape_voteview)
-    load_voteview(con, scrape_voteview.output)
-
     fetch_if_needed(scrape_lugar_house)
     fetch_if_needed(scrape_lugar_senate)
-    load_lugar(con, scrape_lugar_house.output, 'House')
-    load_lugar(con, scrape_lugar_senate.output, 'Sentate')
-
-    # h/t https://docs.python.org/3/library/itertools.html#itertools-recipes
     collections.deque(map(scrape_commonground_state_index, states), 0)
+
+
+    # LOAD
+
+    con = sqlite3.connect("data/clean/bridge.sqlite")
+
+    load_538(con, scrape_538_quiet_caucus.output)
+    load_cook_pvi(con, scrape_cook_pvi.output)
+    load_govtrack_cosponsor(con, scrape_govtrack_cosponsor_house.output, "House")
+    load_govtrack_cosponsor(con, scrape_govtrack_cosponsor_senate.output, "Senate")
+    load_voteview(con, scrape_voteview.output)
+    load_lugar(con, scrape_lugar_house.output, 'House')
+    load_lugar(con, scrape_lugar_senate.output, 'Senate')
     load_commonground(con, scrape_commonground_state_index.base)
+
+
+
+    # Create a workbook and add a worksheet.
+    workbook = xlsxwriter.Workbook('data/clean/bridge.xlsx')
+    worksheet = workbook.add_worksheet()
+
+    # Write some data headers.
+    worksheet.write('A1', 'Item')
 
     con.close()
 
