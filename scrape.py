@@ -3,6 +3,7 @@ import bs4
 
 
 import collections
+import csv
 import os
 import sqlite3
 import time
@@ -41,6 +42,56 @@ scrape_538_quiet_caucus = make_fetcher(
         url= "https://github.com/fivethirtyeight/data/raw/master/quiet-caucus-2024/clustered_congress.csv",
         output= "data/raw/clustered_congress.csv"
 )
+
+def write_538(con, row):
+    con.execute("""
+    insert into five_thirty_eight_quiet_caucus (
+        icpsr, name, last_name , party , district , terms_pct , margin_2020 , cluster , agreement_score , progressive , new_dems , blue_dogs , problem_solvers , RMSP , governance , study , freedom , dw_nominate_dim1 , dw_nominate_dim2 , notes
+    ) values (
+         ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?,  ?, ?
+    );
+    """, row )
+
+def load_538(con, filename):
+    with con:
+        con.execute("""
+
+        CREATE TABLE five_thirty_eight_quiet_caucus (
+            icpsr integer,
+			name text,
+			last_name text,
+			party text,
+			district text,
+			terms_pct real,
+			margin_2020 text,
+			cluster text,
+			agreement_score real,
+			progressive integer,
+			new_dems integer,
+			blue_dogs integer,
+			problem_solvers integer,
+			RMSP integer,
+			governance integer,
+			study integer,
+			freedom integer,
+			dw_nominate_dim1 real,
+			dw_nominate_dim2 real,
+			notes text
+        )
+        """)
+
+        with open(filename) as fp:
+            reader = csv.reader(fp)
+            next(reader) # throw out header
+            for row in reader:
+                row[0] = int(row[0])
+                row[5] = float(row[5].replace("%", "")) if row[5] != "ƒis" else None #Absolutely bizzare data for Jim Himes
+                row[8] = float(row[8].replace("%", "")) if row[8] != "" else None
+                for i in range(9,17):
+                    row[i] = 0 if row[i] == "" else 1
+                row[17] = float(row[17])
+                row[18] = float(row[18])
+                write_538(con, row)
 
 ######################################################################
 
@@ -187,7 +238,11 @@ if __name__ == "__main__":
     os.makedirs("data/raw", exist_ok=True)
     os.makedirs("data/clean", exist_ok=True)
 
+    con = sqlite3.connect("data/clean/bridge.sqlite")
+
     fetch_if_needed(scrape_538_quiet_caucus)
+    load_538(con, scrape_538_quiet_caucus.output)
+    con.close()
 
     fetch_if_needed(scrape_cook_pvi)
 
