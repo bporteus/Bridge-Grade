@@ -4,6 +4,7 @@ import bs4
 
 import collections
 import csv
+import json
 import os
 import sqlite3
 import time
@@ -385,6 +386,99 @@ def scrape_commonground_state_index(state_tup):
         fetch_if_needed(make_fetcher(url=url, output=output))
 
 
+def load_commonground(con, filename):
+    with con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS commonground(
+            name text,
+            chamber text,
+            state text,
+            district int,
+            party text,
+            total int,
+            official_performance int,
+            personal_actions int,
+            communications int,
+            commitments int,
+            bonus int,
+            constituent_partisan_intensity int
+            );
+        """)
+
+    with con:
+        for d, _, files in os.walk(filename):
+            for f in files:
+                if f == "index.html":
+                    continue
+                row = read_commonground_scorecard(f"{d}/{f}")
+                write_commonground(con, row)
+
+def read_commonground_scorecard(filename):
+    with open(filename) as fp:
+        soup = bs4.BeautifulSoup(fp)
+
+    h = soup.head.title.text
+    name =  h[:h.find(" - ")]
+
+    h = soup.article.h5.text
+    chamber = h[h.find(" ")+1:]
+
+    h = soup.find("span", class_="state-district-pary").text
+    h = h.replace("(", "").replace(" ", "").replace(")", "").split("-")
+    if chamber == "House":
+        state, district, party =  h
+        district = int(district)
+    else:
+        if "" in h and len(h) == 3:
+            h.remove("")
+        state, party = h
+        district = None
+
+
+
+    rightbar = soup.find("div", class_="single-main-right")
+
+    total = int(rightbar.h5.text)
+
+    subscores = rightbar.find_all("div", class_="single-official-performance")
+    official_performance = int(subscores[0].div.div.text)
+    personal_actions     = int(subscores[1].div.div.text)
+    communications       = int(subscores[2].div.div.text)
+    commitments          = int(subscores[3].div.div.text)
+    bonus                = int(subscores[4].div.div.text)
+
+    mavmat_script = soup.find("div", class_="mm-container").find("script", src=None).text
+    left = mavmat_script.find("arrayToDataTable(") + 17
+    right = mavmat_script.find(");", left)
+    #mavmat = json.loads(mavmat_script[left:right])
+    mavmat = eval(mavmat_script[left:right].replace("[ ,", "["))
+
+    constituent_partisan_intensity = mavmat[1][0]
+
+    return (
+            name,
+            chamber,
+            state,
+            district,
+            party,
+            total,
+            official_performance,
+            personal_actions,
+            communications,
+            commitments,
+            bonus,
+            constituent_partisan_intensity
+            )
+
+def write_commonground(con, row):
+    con.execute("""
+    insert into commonground (
+        name, chamber, state, district, party, total, official_performance, personal_actions, communications, commitments, bonus, constituent_partisan_intensity
+    ) values (
+       ?,?,?,?,?,?,?,?,?,?,?,?
+    )
+    """, row)
+
 
 if __name__ == "__main__":
     os.makedirs("data/raw", exist_ok=True)
@@ -414,9 +508,10 @@ if __name__ == "__main__":
     fetch_if_needed(scrape_lugar_senate)
     load_lugar(con, scrape_lugar_house.output, 'House')
     load_lugar(con, scrape_lugar_senate.output, 'Sentate')
-    con.close()
 
     # h/t https://docs.python.org/3/library/itertools.html#itertools-recipes
     collections.deque(map(scrape_commonground_state_index, states), 0)
+    load_commonground(con, scrape_commonground_state_index.base)
 
+    con.close()
 
