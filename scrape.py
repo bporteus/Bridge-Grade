@@ -142,6 +142,43 @@ scrape_govtrack_cosponsor_senate = make_fetcher(
         output= "data/raw/govtrack_cosponsor_senate.csv"
 )
 
+def write_govtrack_cosponsor(con, row, chamber):
+        con.execute("""
+        insert into govtrack_cosponsor (
+            chamber, rank_from_low, rank_from_high, percentile, cosponsored_other_party, id, bioguide_id, state, district, name
+        ) values (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        );
+        """, (chamber, *row))
+
+def load_govtrack_cosponsor(con, filename, chamber):
+    with con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS govtrack_cosponsor(
+            chamber text,
+            rank_from_low int,
+			rank_from_high int,
+			percentile int,
+			cosponsored_other_party real,
+			id int,
+			bioguide_id text,
+			state text,
+			district int,
+			name text
+            );
+        """)
+        with open(filename) as fp:
+            reader = csv.reader(fp)
+            next(reader) # throw out header
+            for row in reader:
+                row[0] = int(row[0])
+                row[1] = int(row[1])
+                row[2] = int(row[2])
+                row[3] = float(row[3])
+                row[4] = int(row[4])
+                row[7] = int(row[7]) if row[7] != "" else None
+                row[8] = eval(row[8]) # convert bytes escaped to regular text
+                write_govtrack_cosponsor(con, row, chamber)
 ######################################################################
 
 scrape_voteview = make_fetcher(
@@ -149,13 +186,67 @@ scrape_voteview = make_fetcher(
         output= "data/raw/vote_view.csv"
 )
 
-######################################################################
+def write_voteview(con, row):
+        con.execute("""
+        insert into voteview (
+            congress, chamber, icpsr, state_icpsr, district_code, state_abbrev, party_code, occupancy, last_means, bioname , bioguide_id, born, died, nominate_dim1, nominate_dim2, nominate_log_likelihood, nominate_geo_mean_probability, nominate_number_of_votes, nominate_number_of_errors, conditional, nokken_poole_dim1, nokken_poole_dim2
+        ) values (
+           ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+        );
+        """, row)
 
-scrape_voteview = make_fetcher(
-        url= "https://voteview.com/static/data/out/members/HSall_members.csv",
-        output= "data/raw/vote_view.csv"
-)
 
+def load_voteview(con, filename):
+    with con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS voteview(
+            congress int,
+			chamber text,
+			icpsr int,
+			state_icpsr int,
+			district_code int,
+			state_abbrev text,
+			party_code int,
+			occupancy int,
+			last_means int,
+			bioname  text,
+			bioguide_id text,
+			born int,
+			died int,
+			nominate_dim1 real,
+			nominate_dim2 real,
+			nominate_log_likelihood real,
+			nominate_geo_mean_probability real,
+			nominate_number_of_votes int,
+			nominate_number_of_errors int,
+			conditional text,
+			nokken_poole_dim1 real,
+            nokken_poole_dim2 real
+            );
+        """)
+        with open(filename) as fp:
+            reader = csv.reader(fp)
+            next(reader) # throw out header
+            for row in reader:
+                row[0] = int(row[0])
+
+                if row[0] < 118: continue # only want most recent congress
+
+                row[2] = int(row[2])
+                row[3] = int(row[3])
+                row[4] = int(row[4])
+                row[6] = int(row[6]) # party code
+                row[7] = int(row[7]) if row[7] != '' else None # occupancy
+                row[8] = int(row[8]) if row[8] != '' else None # last_means
+                row[11] = int(row[11][:4]) if row[11] != '' else None # born
+                row[12] = int(row[12][:4]) if row[12] != '' else None # died
+                for i in range(13, 17):
+                    row[i] = float(row[i]) if row[i] else None
+                row[17] = int(row[17]) if row[17] else None # num_votes
+                row[18] = int(row[18]) if row[18] else None # of_errors
+                row[20] = float(row[20])
+                row[21] = float(row[21])
+                write_voteview(con,row)
 ######################################################################
 
 scrape_lugar_house = make_fetcher(
@@ -235,10 +326,11 @@ def commonground_is_congress(politician):
        or politician.find(class_="U.S. Senate")
     )
 
+@with_attrs(base="data/raw/commonground")
 def scrape_commonground_state_index(state_tup):
     state, abbr = state_tup
     url = f"https://commongroundscorecard.org/tag/{abbr}/"
-    out_dir = f"data/raw/commonground/{abbr}/"
+    out_dir = f"{scrape_commonground_state_index.base}/{abbr}/"
     out_index = f"{out_dir}/index.html"
     os.makedirs(out_dir, exist_ok=True)
 
@@ -276,12 +368,17 @@ if __name__ == "__main__":
     # Cook PVI
     fetch_if_needed(scrape_cook_pvi)
     load_cook_pvi(con, scrape_cook_pvi.output)
-    con.close()
 
+    # GovTrack
     fetch_if_needed(scrape_govtrack_cosponsor_house)
     fetch_if_needed(scrape_govtrack_cosponsor_senate)
+    load_govtrack_cosponsor(con, scrape_govtrack_cosponsor_house.output, "house")
+    load_govtrack_cosponsor(con, scrape_govtrack_cosponsor_senate.output, "senate")
 
+    # VoteView
     fetch_if_needed(scrape_voteview)
+    load_voteview(con, scrape_voteview.output)
+    con.close()
 
     fetch_if_needed(scrape_lugar_house)
     fetch_if_needed(scrape_lugar_senate)
