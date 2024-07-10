@@ -4,6 +4,7 @@ import bs4
 
 import collections
 import os
+import sqlite3
 import time
 
 ######################################################################
@@ -27,7 +28,7 @@ def make_fetcher(url, output):
     @with_attrs(url=url, output=output)
     def fetcher():
         print("fetching: ", fetcher.url)
-        r = requests.get(fetcher.url)
+        r = requests.get(fetcher.url, headers={'User-Agent': 'Mozilla/5.0'})
         with open(fetcher.output, "w") as out:
             out.write(r.text)
 
@@ -148,6 +149,12 @@ states = [
     ('WYOMING', 'WY')
 ]
 
+def commonground_is_congress(politician):
+    return None is not (
+       politician.find(class_="U.S. House")
+       or politician.find(class_="U.S. Senate")
+    )
+
 def scrape_commonground_state_index(state_tup):
     state, abbr = state_tup
     url = f"https://commongroundscorecard.org/tag/{abbr}/"
@@ -156,6 +163,18 @@ def scrape_commonground_state_index(state_tup):
     os.makedirs(out_dir, exist_ok=True)
 
     fetch_if_needed(make_fetcher(url=url, output=out_index))
+
+    with open(out_index) as f:
+        soup = bs4.BeautifulSoup(f.read())
+
+    for politician in soup.find_all(class_="politician-wrap"):
+        if not commonground_is_congress(politician):
+            continue
+        url = politician.find('a')['href']
+        stub = url.split('/')[-2]
+        output = f"{out_dir}/{stub}.html"
+        fetch_if_needed(make_fetcher(url=url, output=output))
+
 
 
 
@@ -182,4 +201,5 @@ if __name__ == "__main__":
 
     # h/t https://docs.python.org/3/library/itertools.html#itertools-recipes
     collections.deque(map(scrape_commonground_state_index, states), 0)
+
 
