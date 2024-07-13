@@ -577,8 +577,10 @@ def get_all(con):
     """
 
     with con:
-        result = con.execute(query)
-        return result.fetchall()
+        cur = con.cursor()
+        result = cur.execute(query)
+        title = [i[0] for i in cur.description]
+        return title, result.fetchall()
 
 
 
@@ -614,8 +616,13 @@ if __name__ == "__main__":
     load_lugar(con, scrape_lugar_senate.output, 'Senate')
     load_commonground(con, scrape_commonground_state_index.base)
 
+    # DENORMALIZE
+
     # get all in one table
-    data = get_all(con)
+    title, data = get_all(con)
+    con.close()
+
+    #######################################
 
 
     # Create a workbook and add a worksheet.
@@ -624,12 +631,16 @@ if __name__ == "__main__":
 
 
     # TODO Write some data headers.
+    i = 0
+    for j, val in enumerate(title):
+        worksheet.write(i,j,val)
 
-    for i, row in enumerate(data):
+
+    for row in data:
+        i += 1
         for j, val in enumerate(row):
             worksheet.write(i,j,val)
 
-    con.close()
     workbook.close()
 
 
