@@ -508,6 +508,15 @@ def get_all(con):
         concat(state_abbrev, "-", district_code) as state_district
       from voteview
       where not icpsr in (29373, 90915) -- Manchin and Menendez have extra records?
+    ),
+    lugar_clean as (
+      select * from lugar
+    ),
+    commonground_clean as (
+      select concat(state, "-", case when chamber = "House" then district else 0 end) as state_district,
+        substr(name, instr(name, " ")+1, 999) as last,
+      *
+      from commonground
     )
 
     select * from fte
@@ -537,11 +546,34 @@ def get_all(con):
             upper(voteview_clean.bioname) like upper(concat(cook_clean.last,", ",cook_clean.first, "%"))
             AND voteview_clean.state_district = cook_clean.Dist
           ) or (
-            upper(voteview_clean.last) = upper(govtrack_clean.name)
-            AND voteview_clean.state_district = govtrack_clean.state_district
+            voteview_clean.bioguide_id = govtrack_clean.bioguide_id
           )
         )
-
+    full outer join lugar_clean on (
+      (
+        fte.last_name = lugar_clean.last
+        and fte.name like Concat(substr(lugar_clean.first,1,1), "%")
+        and fte.district like Concat(lugar_clean.state, "-%")
+        and fte.party = lugar_clean.party
+        AND fte.chamber = lugar_clean.chamber
+      ) or (
+        govtrack_clean.name = lugar_clean.last
+        AND govtrack_clean.state = lugar_clean.state
+        AND govtrack_clean.chamber = lugar_clean.chamber
+      ) or (
+        upper(voteview_clean.bioname) like upper(concat(lugar_clean.last, ", ", substr(lugar_clean.first,1,1), "%"))
+        AND voteview_clean.state_abbrev = lugar_clean.state
+      )
+    )
+    full outer join commonground_clean on (
+      (
+        voteview_clean.state_district = commonground_clean.state_district
+        and upper(commonground_clean.last) like concat("%",upper(voteview_clean.last),"%")
+      ) or (
+        govtrack_clean.state_district = commonground_clean.state_district
+        and commonground_clean.last like concat("%",govtrack_clean.name,"%")
+      )
+    )
     """
 
     with con:
