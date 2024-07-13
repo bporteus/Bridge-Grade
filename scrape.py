@@ -21,19 +21,17 @@ def with_attrs(**kwargs):
         return func
     return decorator
 
-def fetch_if_needed(fetcher):
-    if not os.path.isfile(fetcher.output):
-        fetcher()
-        time.sleep(2)
-
 def make_fetcher(url, output):
 
     @with_attrs(url=url, output=output)
     def fetcher():
+        if os.path.isfile(fetcher.output):
+            return
         print("fetching: ", fetcher.url)
         r = requests.get(fetcher.url, headers={'User-Agent': 'Mozilla/5.0'})
         with open(fetcher.output, "w") as out:
             out.write(r.text)
+        time.sleep(2)
 
     return fetcher
 
@@ -131,6 +129,8 @@ def load_cook_pvi(con, filename):
             reader = csv.reader(fp, delimiter='\t')
             next(reader) # throw out header
             for row in reader:
+                row[0] = row[0][:5].replace("-0", "-")
+                row[2] = row[2].replace("í", "i").replace("á", "a")
                 row[6] = int(row[6])
                 write_cook_pvi(con, row)
 ######################################################################
@@ -180,7 +180,7 @@ def load_govtrack_cosponsor(con, filename, chamber):
                 row[3] = float(row[3])
                 row[4] = int(row[4])
                 row[7] = int(row[7]) if row[7] != "" else None
-                row[8] = eval(row[8]) # convert bytes escaped to regular text
+                row[8] = eval(row[8]).decode("utf-8").replace("í","i").replace("á", "a") # convert bytes escaped to regular text
                 write_govtrack_cosponsor(con, row, chamber)
 ######################################################################
 
@@ -241,6 +241,7 @@ def load_voteview(con, filename):
                 row[6] = int(row[6]) # party code
                 row[7] = int(row[7]) if row[7] != '' else None # occupancy
                 row[8] = int(row[8]) if row[8] != '' else None # last_means
+                row[9] = row[9].replace("Á", "A").replace("Ó", "O").replace("Í","I")
                 row[11] = int(row[11][:4]) if row[11] != '' else None # born
                 row[12] = int(row[12][:4]) if row[12] != '' else None # died
                 for i in range(13, 17):
@@ -374,7 +375,7 @@ def scrape_commonground_state_index(state_tup):
     out_index = f"{out_dir}/index.html"
     os.makedirs(out_dir, exist_ok=True)
 
-    fetch_if_needed(make_fetcher(url=url, output=out_index))
+    make_fetcher(url=url, output=out_index)()
 
     with open(out_index) as f:
         soup = bs4.BeautifulSoup(f.read())
@@ -385,7 +386,7 @@ def scrape_commonground_state_index(state_tup):
         url = politician.find('a')['href']
         stub = url.split('/')[-2]
         output = f"{out_dir}/{stub}.html"
-        fetch_if_needed(make_fetcher(url=url, output=output))
+        make_fetcher(url=url, output=output)()
 
 
 def load_commonground(con, filename):
@@ -481,6 +482,76 @@ def write_commonground(con, row):
     )
     """, row)
 
+######################################################################
+######################################################################
+
+def get_all(con):
+    query = """
+
+    with fte as (
+      select *
+      from five_thirty_eight_quiet_caucus
+    ),
+    cook_clean as (
+      select concat(First, ' ', Last) as name, *
+      from cook_pvi
+
+    ),
+    govtrack_clean as (
+      select concat(state, "-", case when chamber = "House" then district else 0 end) as state_district,
+      *
+      from govtrack_cosponsor
+    ),
+    voteview_clean as (
+      select *,
+        (substr(bioname, 1, instr(bioname, ',')-1)) as last,
+        concat(state_abbrev, "-", district_code) as state_district
+      from voteview
+      where not icpsr in (29373, 90915) -- Manchin and Menendez have extra records?
+    )
+
+    select * from fte
+    full outer join cook_clean on (
+            fte.name = cook_clean.name
+            or (
+              fte.last_name = cook_clean.last
+              and fte.District = cook_clean.Dist
+              and fte.party = cook_clean.party
+            )
+                       -- or (instr(fte.name, cook_clean.Last) and substr(fte.name,1,1) = substr(cook_clean.First, 1,1))
+        )
+    full outer join govtrack_clean on (
+          (
+            cook_clean.last = govtrack_clean.name
+            AND govtrack_clean.state_district = cook_clean.Dist
+          ) or (
+            fte.last_name = govtrack_clean.name
+            AND govtrack_clean.state_district = fte.District
+          )
+        )
+    full outer join voteview_clean on (
+          (
+            upper(voteview_clean.last) = upper(fte.last_name)
+            AND voteview_clean.state_district = fte.District
+          ) or (
+            upper(voteview_clean.bioname) like upper(concat(cook_clean.last,", ",cook_clean.first, "%"))
+            AND voteview_clean.state_district = cook_clean.Dist
+          ) or (
+            upper(voteview_clean.last) = upper(govtrack_clean.name)
+            AND voteview_clean.state_district = govtrack_clean.state_district
+          )
+        )
+
+    """
+
+    with con:
+        result = con.execute(query)
+        return result.fetchall()
+
+
+
+######################################################################
+######################################################################
 
 if __name__ == "__main__":
     os.makedirs("data/raw", exist_ok=True)
@@ -488,13 +559,13 @@ if __name__ == "__main__":
 
 
     # Scrape
-    fetch_if_needed(scrape_538_quiet_caucus)
-    fetch_if_needed(scrape_cook_pvi)
-    fetch_if_needed(scrape_govtrack_cosponsor_house)
-    fetch_if_needed(scrape_govtrack_cosponsor_senate)
-    fetch_if_needed(scrape_voteview)
-    fetch_if_needed(scrape_lugar_house)
-    fetch_if_needed(scrape_lugar_senate)
+    scrape_538_quiet_caucus()
+    scrape_cook_pvi()
+    scrape_govtrack_cosponsor_house()
+    scrape_govtrack_cosponsor_senate()
+    scrape_voteview()
+    scrape_lugar_house()
+    scrape_lugar_senate()
     collections.deque(map(scrape_commonground_state_index, states), 0)
 
 
@@ -511,14 +582,22 @@ if __name__ == "__main__":
     load_lugar(con, scrape_lugar_senate.output, 'Senate')
     load_commonground(con, scrape_commonground_state_index.base)
 
+    # get all in one table
+    data = get_all(con)
 
 
     # Create a workbook and add a worksheet.
     workbook = xlsxwriter.Workbook('data/clean/bridge.xlsx')
     worksheet = workbook.add_worksheet()
 
-    # Write some data headers.
-    worksheet.write('A1', 'Item')
+
+    # TODO Write some data headers.
+
+    for i, row in enumerate(data):
+        for j, val in enumerate(row):
+            worksheet.write(i,j,val)
 
     con.close()
+    workbook.close()
+
 
